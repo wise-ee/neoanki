@@ -280,10 +280,16 @@ def main() -> None:
                 print(_table_display(current_table))
                 again = questionary.select(
                     "\nCo dalej?",
-                    choices=["Wymieszaj ponownie", "Wróć do menu"],
+                    choices=["Wymieszaj ponownie", "Pokaż tłumaczenia", "Wróć do menu"],
                 ).ask()
                 if not again or again == "Wróć do menu":
                     break
+                if again == "Pokaż tłumaczenia" and current_table:
+                    clearScreen()
+                    print("Kolejność jak po wymieszaniu:\n")
+                    for word, trans in current_table:
+                        print(f"  {word}: {trans if trans else '(brak tłumaczenia)'}")
+                    input("\nEnter...")
             continue
         if choice == "Nowa tablica":
             current_table = getInputTable()
