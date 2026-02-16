@@ -1,0 +1,2 @@
+questionary>=2.0,<3.0
+prompt_toolkit>=2.0,<4.0
