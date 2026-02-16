@@ -9,25 +9,138 @@ from datetime import datetime
 import questionary
 
 BACKUP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "neoanki_backup.json")
+BACKUP_BACKUP_PATH = BACKUP_PATH + ".bak"
+
+# Tablica = lista par (słowo, tłumaczenie). Tłumaczenie może być "".
+TableRow = tuple[str, str]
+Table = list[TableRow]
 
 
-def load_backup() -> dict[str, list[str]]:
-    if not os.path.exists(BACKUP_PATH):
-        return {}
-    with open(BACKUP_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+def _row_to_display(row: TableRow | str) -> str:
+    """Akceptuje (word, trans) lub legacy: pojedynczy string (traktowany jako word bez tłumaczenia)."""
+    if isinstance(row, str):
+        return row
+    w, t = row
+    return f"{w} ({t})" if t else w
 
 
-def save_backup(boards: dict[str, list[str]]) -> None:
-    with open(BACKUP_PATH, "w", encoding="utf-8") as f:
-        json.dump(boards, f, ensure_ascii=False, indent=2)
+def _table_display(table: Table, max_items: int | None = None) -> str:
+    part = table[:max_items] if max_items else table
+    return ", ".join(_row_to_display(r) for r in part) + ("..." if max_items and len(table) > max_items else "")
 
 
-def getInputTable():
+def _parse_table_cell(cell: str) -> TableRow:
+    cell = cell.strip()
+    if "|" in cell:
+        w, _, t = cell.partition("|")
+        return (w.strip(), t.strip())
+    return (cell, "")
+
+
+def _validate_backup(data: object) -> dict[str, list[list[str]]] | None:
+    """Akceptuje dict: wartości to listy stringów (stary format) lub listy [word, trans]. Zwraca znormalizowane listy [word, trans]."""
+    if not isinstance(data, dict):
+        return None
+    out: dict[str, list[list[str]]] = {}
+    for k, v in data.items():
+        if not isinstance(k, str) or not isinstance(v, list):
+            return None
+        rows: list[list[str]] = []
+        for x in v:
+            if isinstance(x, str):
+                rows.append([x, ""])
+            elif isinstance(x, list) and len(x) == 2 and isinstance(x[0], str) and isinstance(x[1], str):
+                rows.append([x[0], x[1]])
+            else:
+                return None
+        out[k] = rows
+    return out
+
+
+def _backup_to_table(rows: list[list[str]]) -> Table:
+    return [ (r[0], r[1]) for r in rows ]
+
+
+def _table_to_backup(table: Table) -> list[list[str]]:
+    return [ [w, t] for w, t in table ]
+
+
+def _validate_table(table: object) -> bool:
+    """Sprawdza, czy to Table (lista par (str, str))."""
+    if not isinstance(table, list):
+        return False
+    for row in table:
+        if not isinstance(row, (list, tuple)) or len(row) != 2:
+            return False
+        if not isinstance(row[0], str) or not isinstance(row[1], str):
+            return False
+    return True
+
+
+def _read_backup_file(path: str) -> dict[str, list[list[str]]] | None:
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return _validate_backup(data)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def load_backup() -> tuple[dict[str, Table], bool]:
+    """Wczytuje backup; przy uszkodzeniu głównego pliku próbuje .bak. Naprawia main z .bak jeśli trzeba.
+    Zwraca (dane, recovered_from_bak)."""
+    main_data = _read_backup_file(BACKUP_PATH)
+    if main_data is not None:
+        return {k: _backup_to_table(v) for k, v in main_data.items()}, False
+    bak_data = _read_backup_file(BACKUP_BACKUP_PATH)
+    if bak_data is not None:
+        try:
+            with open(BACKUP_PATH, "w", encoding="utf-8") as f:
+                json.dump(bak_data, f, ensure_ascii=False, indent=2)
+        except OSError:
+            pass
+        return {k: _backup_to_table(v) for k, v in bak_data.items()}, True
+    return {}, False
+
+
+def save_backup(boards: dict[str, Table]) -> None:
+    """Zapisuje backup: najpierw kopia main→.bak, potem zapis do main (przez plik tymczasowy)."""
+    if not isinstance(boards, dict):
+        raise ValueError("Nieprawidłowa struktura backupu")
+    for k, v in boards.items():
+        if not isinstance(k, str) or not _validate_table(v):
+            raise ValueError("Nieprawidłowa struktura backupu")
+    serialized = {k: _table_to_backup(v) for k, v in boards.items()}
+    if _validate_backup(serialized) is None:
+        raise ValueError("Nieprawidłowa struktura backupu")
+    if os.path.exists(BACKUP_PATH):
+        try:
+            with open(BACKUP_PATH, "r", encoding="utf-8") as f:
+                prev = f.read()
+            with open(BACKUP_BACKUP_PATH, "w", encoding="utf-8") as f:
+                f.write(prev)
+        except OSError:
+            pass
+    fd, tmp = tempfile.mkstemp(suffix=".json", dir=os.path.dirname(BACKUP_PATH) or ".")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(serialized, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, BACKUP_PATH)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def getInputTable() -> Table:
     clearScreen()
-    wordsInput = input("Wypisz słowa oddzielone przecinkiem: \n")
-    wordsInput = wordsInput.split(",")
-    table = [word.strip() for word in wordsInput]
+    prompt = "Wpisz elementy (element|tłumaczenie oddzielone przecinkiem):\n"
+    raw = input(prompt)
+    table = [_parse_table_cell(cell) for cell in raw.split(",") if cell.strip()]
     return table
 
 
@@ -42,14 +155,14 @@ def getShuffledTable(table: list):
 
 
 def backup_submenu(
-    current_table: list[str],
+    current_table: Table,
     current_name: str | None,
-    used_boards: dict[str, list[str]],
-) -> tuple[list[str], str | None, dict[str, list[str]]]:
+    used_boards: dict[str, Table],
+) -> tuple[Table, str | None, dict[str, Table]]:
     clearScreen()
     label = f"Obecna tablica: {current_name or '(bez nazwy)'}"
     print(label)
-    print(", ".join(current_table) if current_table else "(pusta)")
+    print(_table_display(current_table) if current_table else "(pusta)")
     print()
     choice = questionary.select(
         "Backup:",
@@ -59,13 +172,13 @@ def backup_submenu(
         return current_table, current_name, used_boards
 
     if choice == "Wyciągnij tablicę":
-        backup = load_backup()
+        backup, _ = load_backup()
         if not backup:
             clearScreen()
             input("Brak zapisanych tablic. Enter...")
             return current_table, current_name, used_boards
         clearScreen()
-        print("Obecna:", ", ".join(current_table) if current_table else "(pusta)\n")
+        print("Obecna:", _table_display(current_table) if current_table else "(pusta)\n")
         name = questionary.select("Którą tablicę?", choices=list(backup.keys())).ask()
         if name:
             used_boards[name] = backup[name]
@@ -73,19 +186,19 @@ def backup_submenu(
 
     if choice == "Zapisz obecną":
         clearScreen()
-        print("Obecna tablica:", ", ".join(current_table) if current_table else "(pusta)\n")
+        print("Obecna tablica:", _table_display(current_table) if current_table else "(pusta)\n")
         base = questionary.text("Nazwa tablicy (opcjonalnie):").ask()
         stamp = datetime.now().strftime("%Y-%m-%d %H-%M")
         name = f"{base} {stamp}".strip() if base else stamp
         if name:
             used_boards[name] = current_table
-            backup = load_backup()
+            backup, _ = load_backup()
             backup[name] = current_table
             save_backup(backup)
             return current_table, name, used_boards
 
     if choice == "Edytuj tablicę":
-        backup = load_backup()
+        backup, _ = load_backup()
         if not backup:
             clearScreen()
             input("Brak zapisanych tablic. Enter...")
@@ -96,7 +209,7 @@ def backup_submenu(
         with tempfile.NamedTemporaryFile(
             mode="w", suffix=".txt", delete=False, encoding="utf-8"
         ) as f:
-            f.write(", ".join(backup[name]))
+            f.write(", ".join(f"{w}|{t}" if t else w for w, t in backup[name]))
             path = f.name
         try:
             editor = os.environ.get("EDITOR", "notepad" if sys.platform == "win32" else "nano")
@@ -105,7 +218,7 @@ def backup_submenu(
                 raw = f.read()
         finally:
             os.unlink(path)
-        new_table = [w.strip() for w in raw.split(",") if w.strip()]
+        new_table = [_parse_table_cell(cell) for cell in raw.split(",") if cell.strip()]
         backup[name] = new_table
         save_backup(backup)
         if current_name == name:
@@ -116,7 +229,7 @@ def backup_submenu(
         input(f"Zapisano: {name}. Enter...")
 
     if choice == "Usuń nieużywane":
-        backup = load_backup()
+        backup, _ = load_backup()
         used_names = set(used_boards.keys())
         to_remove_keys = [k for k in backup if k not in used_names]
         if not to_remove_keys:
@@ -124,7 +237,7 @@ def backup_submenu(
             input("Wszystkie zapisane tablice są używane. Enter...")
             return current_table, current_name, used_boards
         choices = [
-            questionary.Choice(title=f"{k} | {', '.join(backup[k][:8])}{'...' if len(backup[k]) > 8 else ''}", value=k)
+            questionary.Choice(title=f"{k} | {_table_display(backup[k], 8)}", value=k)
             for k in to_remove_keys
         ]
         selected = questionary.checkbox("Które tablice usunąć?", choices=choices).ask()
@@ -140,13 +253,18 @@ def backup_submenu(
 
 def main() -> None:
     clearScreen()
+    _, recovered = load_backup()
+    if recovered:
+        print("Odzyskano backup z pliku .bak (główny plik był uszkodzony).")
+        input("Enter...")
+        clearScreen()
     start = questionary.select(
         "Co chcesz zrobić?",
         choices=["Wpisz tablicę", "Przejdź do menu"],
     ).ask()
     current_table = getInputTable() if start == "Wpisz tablicę" else []
     current_name: str | None = None
-    used_boards: dict[str, list[str]] = {}
+    used_boards: dict[str, Table] = {}
 
     while True:
         clearScreen()
@@ -159,7 +277,7 @@ def main() -> None:
         if choice == "Wymieszaj":
             while True:
                 current_table = getShuffledTable(current_table)
-                print(", ".join(current_table))
+                print(_table_display(current_table))
                 again = questionary.select(
                     "\nCo dalej?",
                     choices=["Wymieszaj ponownie", "Wróć do menu"],

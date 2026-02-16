@@ -33,14 +33,14 @@ def test_main_exit_immediately(monkeypatch, backup_path):
 
     NeoAnki.main()
 
-    assert NeoAnki.load_backup() == {}
+    assert NeoAnki.load_backup()[0] == {}
 
 
 def test_main_save_and_exit(monkeypatch, backup_path):
     """Wpisz tablicę (mocked) -> menu -> Backup -> Zapisz -> Wstecz -> Wyjście -> backup ma 1 wpis."""
     monkeypatch.setattr(NeoAnki, "clearScreen", lambda: None)
     monkeypatch.setattr("builtins.input", lambda _: None)
-    monkeypatch.setattr(NeoAnki, "getInputTable", lambda: ["s1", "s2"])
+    monkeypatch.setattr(NeoAnki, "getInputTable", lambda: [("s1", ""), ("s2", "")])
     monkeypatch.setattr(
         NeoAnki,
         "datetime",
@@ -59,7 +59,7 @@ def test_main_save_and_exit(monkeypatch, backup_path):
 
     NeoAnki.main()
 
-    backup = NeoAnki.load_backup()
+    backup, _ = NeoAnki.load_backup()
     assert len(backup) == 1
     key = next(iter(backup))
-    assert backup[key] == ["s1", "s2"]
+    assert backup[key] == [("s1", ""), ("s2", "")]
