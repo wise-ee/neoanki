@@ -147,7 +147,7 @@ def save_backup(boards: dict[str, Table]) -> None:
 
 def getInputTable() -> Table:
     clearScreen()
-    prompt = "Wpisz elementy (element|tłumaczenie oddzielone przecinkiem):\n"
+    prompt = "Wpisz elementy (element|tłumaczenie oddzielone przecinkiem)\nPrzykład: slowo|tlumaczenie,slowo1|tlumaczenie1,slowo2,slowo3|tlum3\nTłumaczenia są opcjonalne\n"
     raw = input(prompt)
     table = [_parse_table_cell(cell) for cell in raw.split(",") if cell.strip()]
     return table
