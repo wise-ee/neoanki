@@ -29,6 +29,12 @@ def _table_display(table: Table, max_items: int | None = None) -> str:
     return ", ".join(_row_to_display(r) for r in part) + ("..." if max_items and len(table) > max_items else "")
 
 
+def _table_display_words_only(table: Table, max_items: int | None = None) -> str:
+    """Tylko wyrazy (bez tłumaczeń) — do widoku po wymieszaniu."""
+    part = table[:max_items] if max_items else table
+    return ", ".join(r[0] for r in part) + ("..." if max_items and len(table) > max_items else "")
+
+
 def format_translations_display(table: Table) -> str:
     """Zwraca tekst do wyświetlenia: każdy wiersz '  word: trans' lub '  word: (brak tłumaczenia)' w kolejności tablicy."""
     lines = [
@@ -288,7 +294,7 @@ def main() -> None:
                 current_table = getShuffledTable(current_table)
                 while True:
                     clearScreen()
-                    print(_table_display(current_table))
+                    print(_table_display_words_only(current_table))
                     again = questionary.select(
                         "\nCo dalej?",
                         choices=["Wymieszaj ponownie", "Pokaż tłumaczenia", "Usuń element", "Wróć do menu"],
