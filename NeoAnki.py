@@ -383,10 +383,10 @@ def main() -> None:
 
     while True:
         clearScreen()
-        choice = questionary.select(
-            "Wybierz:",
-            choices=["Wymieszaj", "Nowa tablica", "Backup", "Wyjście"],
-        ).ask()
+        menu_choices = ["Nowa tablica", "Backup", "Wyjście"]
+        if current_table:
+            menu_choices.insert(0, "Wymieszaj")
+        choice = questionary.select("Wybierz:", choices=menu_choices).ask()
         if not choice or choice == "Wyjście":
             return
         if choice == "Wymieszaj":
