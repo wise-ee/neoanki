@@ -11,6 +11,10 @@ import questionary
 BACKUP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "neoanki_backup.json")
 BACKUP_BACKUP_PATH = BACKUP_PATH + ".bak"
 
+# ANSI: bold + kolor dla tytułów list w backupie
+_BOLD_CYAN = "\033[1m\033[36m"
+_RESET = "\033[0m"
+
 # Tablica = lista par (słowo, tłumaczenie). Tłumaczenie może być "".
 TableRow = tuple[str, str]
 Table = list[TableRow]
@@ -46,6 +50,16 @@ def _table_display_with_revealed(table: Table, revealed: int) -> str:
     ]
     header = "─" * (width + 4)
     return f"  {header}\n" + "\n".join(lines) + f"\n  {header}"
+
+
+def _print_backup_list(backup: dict[str, Table]) -> None:
+    """Wypisuje listę backupów: tytuł (pogrubiony, kolorowy), poniżej elementy tablicy."""
+    for name in sorted(backup.keys()):
+        table = backup[name]
+        print(f"{_BOLD_CYAN}{name}{_RESET}")
+        for word, trans in table:
+            print(f"    {word}: {trans if trans else '(brak tłumaczenia)'}")
+        print()
 
 
 def format_translations_display(table: Table) -> str:
@@ -251,8 +265,8 @@ def backup_submenu(
             input("Brak zapisanych tablic. Enter...")
             return current_table, current_name, used_boards
         clearScreen()
-        print("Obecna:", _table_display(current_table) if current_table else "(pusta)\n")
-        name = questionary.select("Którą tablicę?", choices=list(backup.keys())).ask()
+        _print_backup_list(backup)
+        name = questionary.select("Którą tablicę wyciągnąć?", choices=sorted(backup.keys())).ask()
         if name:
             used_boards[name] = backup[name]
             return backup[name], name, used_boards
@@ -276,7 +290,9 @@ def backup_submenu(
             clearScreen()
             input("Brak zapisanych tablic. Enter...")
             return current_table, current_name, used_boards
-        name = questionary.select("Którą tablicę edytować?", choices=list(backup.keys())).ask()
+        clearScreen()
+        _print_backup_list(backup)
+        name = questionary.select("Którą tablicę edytować?", choices=sorted(backup.keys())).ask()
         if not name:
             return current_table, current_name, used_boards
         with tempfile.NamedTemporaryFile(
@@ -308,13 +324,12 @@ def backup_submenu(
             input("Brak zapisanych tablic. Enter...")
             return current_table, current_name, used_boards
         clearScreen()
-        print("Wszystkie zapisane tablice (zaznacz te do usunięcia):")
-        print()
-        print("  Zaznacz: Spacja. Potwierdź: Enter. Aby wrócić bez usuwania: nie zaznaczaj nic i Enter.")
+        _print_backup_list(backup)
+        print("Zaznacz: Spacja. Potwierdź: Enter. Aby wrócić bez usuwania: nie zaznaczaj nic i Enter.")
         print()
         choices = [
             questionary.Choice(title=f"{k} | {_table_display(backup[k], 8)}", value=k)
-            for k in backup
+            for k in sorted(backup.keys())
         ]
         selected = questionary.checkbox("Które tablice usunąć?", choices=choices).ask()
         if selected is None:
