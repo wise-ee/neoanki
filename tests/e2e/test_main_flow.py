@@ -67,7 +67,7 @@ def test_main_save_and_exit(monkeypatch, backup_path):
 
 
 def test_main_show_translations_displays_manual_only(capsys, monkeypatch, backup_path):
-    """Wymieszaj -> Pokaż tłumaczenia: na stdout są ręczne tłumaczenia i '(brak tłumaczenia)' w kolejności tablicy."""
+    """Wymieszaj -> Przetłumacz wszystko: na stdout są ręczne tłumaczenia i '(brak tłumaczenia)' w kolejności tablicy."""
     monkeypatch.setattr(NeoAnki, "clearScreen", lambda: None)
     monkeypatch.setattr("builtins.input", lambda _: None)
     table_with_trans = [("słowo1", "trans1"), ("słowo2", ""), ("x", "iks")]
@@ -76,7 +76,7 @@ def test_main_show_translations_displays_manual_only(capsys, monkeypatch, backup
     select_seq = [
         "Wpisz tablicę",
         "Wymieszaj",
-        "Pokaż tłumaczenia",
+        "Przetłumacz wszystko",
         "Wróć do menu",
         "Wyjście",
     ]

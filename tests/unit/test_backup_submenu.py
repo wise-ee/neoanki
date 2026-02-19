@@ -78,7 +78,11 @@ def test_backup_submenu_usun_nieuzywane(monkeypatch, backup_path):
             def ask(_, _self=None):
                 nonlocal call_count
                 call_count += 1
-                return "Usuń nieużywane" if call_count == 1 else None
+                if call_count == 1:
+                    return "Usuń nieużywane"
+                if call_count == 2:
+                    return "Tak, usuń"
+                return None
         return Q()
     def fake_checkbox(*a, **k):
         class Q:
