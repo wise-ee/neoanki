@@ -26,7 +26,11 @@ def test_backup_submenu_zapisz_obecna_persists(monkeypatch, backup_path):
             def ask(_, _self=None):
                 nonlocal call_count
                 call_count += 1
-                return "Zapisz obecną" if call_count == 1 else None
+                if call_count == 1:
+                    return "Zapisz obecną"
+                if call_count == 2:
+                    return "[nowa tablica]"
+                return None
         return Q()
     def fake_text(*a, **k):
         class Q:
@@ -43,6 +47,30 @@ def test_backup_submenu_zapisz_obecna_persists(monkeypatch, backup_path):
     key = next(iter(backup))
     assert "2025-01-01" in key
     assert backup[key] == [("elem1", ""), ("elem2", "")]
+
+
+def test_backup_submenu_zapisz_nadpisuje(monkeypatch, backup_path):
+    backup_path.write_text('{"stara": [["x", ""]]}', encoding="utf-8")
+    monkeypatch.setattr(NeoAnki, "clearScreen", lambda: None)
+    monkeypatch.setattr("builtins.input", lambda _: None)
+    call_count = 0
+    def fake_select(*a, **k):
+        class Q:
+            def ask(_, _self=None):
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    return "Zapisz obecną"
+                if call_count == 2:
+                    return "stara"
+                return None
+        return Q()
+    monkeypatch.setattr(NeoAnki.questionary, "select", fake_select)
+
+    NeoAnki.backup_submenu([("nowy1", "N1"), ("nowy2", "")], None, {})
+
+    backup, _ = NeoAnki.load_backup()
+    assert backup["stara"] == [("nowy1", "N1"), ("nowy2", "")]
 
 
 def test_backup_submenu_wyciagnij_tablice(monkeypatch, backup_path):

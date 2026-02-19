@@ -272,16 +272,30 @@ def backup_submenu(
             return backup[name], name, used_boards
 
     if choice == "Zapisz obecną":
+        backup, _ = load_backup()
         clearScreen()
-        print("Obecna tablica:", _table_display(current_table) if current_table else "(pusta)\n")
-        base = questionary.text("Nazwa tablicy (opcjonalnie):").ask()
-        stamp = datetime.now().strftime("%Y-%m-%d %H-%M")
-        name = f"{base} {stamp}".strip() if base else stamp
-        if name:
-            used_boards[name] = current_table
-            backup, _ = load_backup()
+        _print_backup_list(backup)
+        choices_save = ["[nowa tablica]"] + sorted(backup.keys())
+        target = questionary.select("Zapisz jako (nowa lub nadpisz wybraną):", choices=choices_save).ask()
+        if not target:
+            return current_table, current_name, used_boards
+        if target == "[nowa tablica]":
+            base = questionary.text("Nazwa tablicy (opcjonalnie):").ask()
+            stamp = datetime.now().strftime("%Y-%m-%d %H-%M")
+            name = f"{base} {stamp}".strip() if base else stamp
+            if name:
+                used_boards[name] = current_table
+                backup, _ = load_backup()
+                backup[name] = current_table
+                save_backup(backup)
+                return current_table, name, used_boards
+        else:
+            name = target
             backup[name] = current_table
             save_backup(backup)
+            used_boards[name] = current_table
+            clearScreen()
+            input(f"Nadpisano: {name}. Enter...")
             return current_table, name, used_boards
 
     if choice == "Edytuj tablicę":
