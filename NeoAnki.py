@@ -382,9 +382,11 @@ def main() -> None:
                 while True:
                     clearScreen()
                     print(_table_display_with_revealed(current_table, revealed_count))
-                    choices_list = ["Przetłumacz wszystko", "Wymieszaj ponownie", "Usuń element", "Wróć do menu"]
                     if revealed_count < len(current_table):
+                        choices_list = ["Przetłumacz wszystko", "Wymieszaj ponownie", "Usuń element", "Wróć do menu"]
                         choices_list.insert(0, "Przetłumacz kolejne słowo")
+                    else:
+                        choices_list = ["Wymieszaj ponownie", "Przetłumacz wszystko", "Usuń element", "Wróć do menu"]
                     again = questionary.select("\nCo dalej?", choices=choices_list).ask()
                     if not again or again == "Wróć do menu":
                         break
