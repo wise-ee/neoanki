@@ -11,8 +11,9 @@ import questionary
 BACKUP_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "neoanki_backup.json")
 BACKUP_BACKUP_PATH = BACKUP_PATH + ".bak"
 
-# ANSI: bold + color for backup list titles
+# ANSI: bold + color for backup list titles; yellow for "to repeat"
 _BOLD_CYAN = "\033[1m\033[36m"
+_YELLOW = "\033[1;33m"
 _RESET = "\033[0m"
 
 # Table = list of pairs (word, translation). Translation can be "".
@@ -39,15 +40,21 @@ def _table_display_words_only(table: Table, max_items: int | None = None) -> str
     return ", ".join(r[0] for r in part) + ("..." if max_items and len(table) > max_items else "")
 
 
-def _table_display_with_revealed(table: Table, revealed: int) -> str:
-    """Numbered list: first `revealed` with translation, rest word only."""
+def _table_display_with_revealed(
+    table: Table, revealed: int, to_repeat: set[TableRow] | None = None
+) -> str:
+    """Numbered list: first `revealed` with translation, rest word only. Rows in to_repeat are yellow."""
     if not table:
         return "(empty)"
+    to_repeat = to_repeat or set()
     width = len(str(len(table)))
-    lines = [
-        f"  {i + 1:>{width}}. " + (_row_to_display(r) if i < revealed else r[0])
-        for i, r in enumerate(table)
-    ]
+    lines: list[str] = []
+    for i, r in enumerate(table):
+        text = _row_to_display(r) if i < revealed else r[0]
+        line = f"  {i + 1:>{width}}. {text}"
+        if r in to_repeat:
+            line = f"  {i + 1:>{width}}. {_YELLOW}{text}{_RESET}"
+        lines.append(line)
     header = "─" * (width + 4)
     return f"  {header}\n" + "\n".join(lines) + f"\n  {header}"
 
@@ -413,17 +420,24 @@ def main() -> None:
         if not choice or choice == "Exit":
             return
         if choice == "Shuffle":
+            to_repeat: set[TableRow] = set()
             while True:
                 current_table = getShuffledTable(current_table)
                 revealed_count = 0
                 while True:
                     clearScreen()
-                    print(_table_display_with_revealed(current_table, revealed_count))
+                    print(_table_display_with_revealed(current_table, revealed_count, to_repeat))
                     if revealed_count < len(current_table):
                         choices_list = ["Show all translations", "Shuffle again", "Add element", "Remove element", "Back to menu"]
                         choices_list.insert(0, "Show next translation")
+                        if revealed_count >= 1:
+                            choices_list.insert(1, "Mark last as to repeat")
+                        if to_repeat:
+                            choices_list.insert(-1, "Show to repeat")
                     else:
                         choices_list = ["Shuffle again", "Show all translations", "Add element", "Remove element", "Back to menu"]
+                        if to_repeat:
+                            choices_list.insert(-1, "Show to repeat")
                     again = questionary.select("\nWhat next?", choices=choices_list).ask()
                     if not again or again == "Back to menu":
                         break
@@ -432,6 +446,37 @@ def main() -> None:
                     if again == "Show next translation":
                         if revealed_count < len(current_table):
                             revealed_count += 1
+                        continue
+                    if again == "Mark last as to repeat" and revealed_count >= 1:
+                        to_repeat.add(current_table[revealed_count - 1])
+                        continue
+                    if again == "Show to repeat" and to_repeat:
+                        child_table = [r for r in current_table if r in to_repeat]
+                        random.shuffle(child_table)
+                        child_revealed = 0
+                        while True:
+                            clearScreen()
+                            print(f"  To repeat ({len(child_table)}):\n")
+                            print(_table_display_with_revealed(child_table, child_revealed, set(child_table)))
+                            if child_revealed < len(child_table):
+                                child_choices = ["Show next translation", "Show all translations", "Shuffle again", "Back"]
+                            else:
+                                child_choices = ["Shuffle again", "Show all translations", "Back"]
+                            child_again = questionary.select("\nWhat next?", choices=child_choices).ask()
+                            if not child_again or child_again == "Back":
+                                break
+                            if child_again == "Shuffle again":
+                                random.shuffle(child_table)
+                                child_revealed = 0
+                                continue
+                            if child_again == "Show next translation" and child_revealed < len(child_table):
+                                child_revealed += 1
+                                continue
+                            if child_again == "Show all translations" and child_table:
+                                clearScreen()
+                                print("To repeat — order as after shuffle:\n")
+                                print(format_translations_display(child_table))
+                                input("\nEnter...")
                         continue
                     if again == "Show all translations" and current_table:
                         clearScreen()
@@ -452,7 +497,9 @@ def main() -> None:
                         ] + [questionary.Choice(title="Cancel", value=None)]
                         to_remove = questionary.select("Which element to remove?", choices=choices).ask()
                         if to_remove is not None:
+                            removed_row = current_table[to_remove]
                             current_table.pop(to_remove)
+                            to_repeat.discard(removed_row)
                             revealed_count = min(revealed_count, len(current_table))
                 if again == "Back to menu":
                     break
