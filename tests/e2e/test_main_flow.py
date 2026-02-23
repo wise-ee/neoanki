@@ -1,4 +1,6 @@
 """E2E test: running main() with mocked questionary/input, asserting backup state."""
+import json
+
 import NeoAnki
 
 
@@ -33,7 +35,8 @@ def test_main_exit_immediately(monkeypatch, backup_path):
 
     NeoAnki.main()
 
-    assert NeoAnki.load_backup()[0] == {}
+    tables, _, _ = NeoAnki.load_backup()
+    assert tables == {}
 
 
 def test_main_save_and_exit(monkeypatch, backup_path):
@@ -61,7 +64,7 @@ def test_main_save_and_exit(monkeypatch, backup_path):
 
     NeoAnki.main()
 
-    backup, _ = NeoAnki.load_backup()
+    backup, _, _ = NeoAnki.load_backup()
     assert len(backup) == 1
     key = next(iter(backup))
     assert backup[key] == [("s1", ""), ("s2", "")]
@@ -90,3 +93,31 @@ def test_main_show_translations_displays_manual_only(capsys, monkeypatch, backup
     assert "word2: (no translation)" in out
     assert "x: iks" in out
     assert "Order as after shuffle" in out
+
+
+def test_main_to_repeat_auto_backup(monkeypatch, backup_path):
+    """Load table -> Shuffle -> Mark last as to repeat -> Back -> Exit: to_repeat is persisted."""
+    payload = {
+        "tables": {"mytable": [["word1", "t1"], ["word2", "t2"]]},
+        "to_repeat": {},
+    }
+    backup_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(NeoAnki, "clearScreen", lambda: None)
+    monkeypatch.setattr("builtins.input", lambda _: None)
+    monkeypatch.setattr(NeoAnki, "getShuffledTable", lambda t: t)
+    select_seq = [
+        "Load table from backup",
+        "mytable",
+        "Shuffle",
+        "Show next translation",
+        "Mark last as to repeat",
+        "Back to menu",
+        "Exit",
+    ]
+    monkeypatch.setattr(NeoAnki.questionary, "select", _make_select_mock(select_seq))
+
+    NeoAnki.main()
+
+    tables, to_repeat, _ = NeoAnki.load_backup()
+    assert "mytable" in to_repeat
+    assert to_repeat["mytable"] == [("word1", "t1")]

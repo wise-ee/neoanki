@@ -42,7 +42,7 @@ def test_backup_submenu_zapisz_obecna_persists(monkeypatch, backup_path):
 
     NeoAnki.backup_submenu([("elem1", ""), ("elem2", "")], None, {})
 
-    backup, _ = NeoAnki.load_backup()
+    backup, _, _ = NeoAnki.load_backup()
     assert len(backup) == 1
     key = next(iter(backup))
     assert "2025-01-01" in key
@@ -69,7 +69,7 @@ def test_backup_submenu_zapisz_nadpisuje(monkeypatch, backup_path):
 
     NeoAnki.backup_submenu([("nowy1", "N1"), ("nowy2", "")], None, {})
 
-    backup, _ = NeoAnki.load_backup()
+    backup, _, _ = NeoAnki.load_backup()
     assert backup["stara"] == [("nowy1", "N1"), ("nowy2", "")]
 
 
@@ -122,7 +122,7 @@ def test_backup_submenu_usun_nieuzywane(monkeypatch, backup_path):
 
     NeoAnki.backup_submenu([("x", "")], "keep", {"keep": [("x", "")]})
 
-    backup, _ = NeoAnki.load_backup()
+    backup, _, _ = NeoAnki.load_backup()
     assert "keep" in backup
     assert "drop" not in backup
 
@@ -149,7 +149,7 @@ def test_backup_submenu_edytuj_tablice(monkeypatch, backup_path):
         [("a", ""), ("b", "")], "tab1", {"tab1": [("a", ""), ("b", "")]}
     )
 
-    backup, _ = NeoAnki.load_backup()
+    backup, _, _ = NeoAnki.load_backup()
     assert backup["tab1"] == [("z", "zł"), ("y", "yy")]
     assert table == [("z", "zł"), ("y", "yy")]
     assert used["tab1"] == [("z", "zł"), ("y", "yy")]

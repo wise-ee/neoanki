@@ -126,44 +126,111 @@ def _validate_table(table: object) -> bool:
     return True
 
 
-def _read_backup_file(path: str) -> dict[str, list[list[str]]] | None:
+def _parse_board_row_list(v: object) -> list[TableRow] | None:
+    """Parses list of [word, trans] or legacy list of str. Returns list of (word, trans) or None."""
+    if not isinstance(v, list):
+        return None
+    out: list[TableRow] = []
+    for x in v:
+        if isinstance(x, str):
+            out.append((x, ""))
+        elif isinstance(x, list) and len(x) == 2 and isinstance(x[0], str) and isinstance(x[1], str):
+            out.append((x[0], x[1]))
+        else:
+            return None
+    return out
+
+
+def _read_backup_raw(path: str) -> object:
     if not os.path.exists(path):
         return None
     try:
         with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return _validate_backup(data)
+            return json.load(f)
     except (json.JSONDecodeError, OSError):
         return None
 
 
-def load_backup() -> tuple[dict[str, Table], bool]:
+def _parse_backup_data(data: object) -> tuple[dict[str, Table], dict[str, list[TableRow]]]:
+    """Parses backup file. New format: name -> {table: [...], to_repeat: [...]}. Legacy: name -> [...]. Returns (tables, to_repeat_by_name)."""
+    tables: dict[str, Table] = {}
+    to_repeat: dict[str, list[TableRow]] = {}
+    if not isinstance(data, dict):
+        return {}, {}
+    # Legacy: root had "tables" and "to_repeat" as separate top-level keys
+    if "tables" in data and isinstance(data.get("tables"), dict):
+        for k, v in (data["tables"] or {}).items():
+            if not isinstance(k, str):
+                continue
+            rows = _parse_board_row_list(v)
+            if rows is not None:
+                tables[k] = rows
+        for k, v in (data.get("to_repeat") or {}).items():
+            if not isinstance(k, str) or not isinstance(v, list):
+                continue
+            rows = _parse_board_row_list(v)
+            if rows is not None:
+                to_repeat[k] = rows
+        return tables, to_repeat
+    # New format: name -> { table: [...], to_repeat: [...] }  or legacy: name -> [...]
+    for k, v in data.items():
+        if not isinstance(k, str):
+            continue
+        if isinstance(v, list):
+            rows = _parse_board_row_list(v)
+            if rows is not None:
+                tables[k] = rows
+                # legacy: no to_repeat key for this board
+        elif isinstance(v, dict) and "table" in v:
+            t_rows = _parse_board_row_list(v["table"])
+            if t_rows is not None:
+                tables[k] = t_rows
+                r_rows = _parse_board_row_list(v.get("to_repeat")) if isinstance(v.get("to_repeat"), list) else []
+                to_repeat[k] = r_rows if r_rows is not None else []
+        else:
+            continue
+    return tables, to_repeat
+
+
+def load_backup() -> tuple[dict[str, Table], dict[str, list[TableRow]], bool]:
     """Loads backup; if main file is corrupted tries .bak. Repairs main from .bak if needed.
-    Returns (data, recovered_from_bak)."""
-    main_data = _read_backup_file(BACKUP_PATH)
-    if main_data is not None:
-        return {k: _backup_to_table(v) for k, v in main_data.items()}, False
-    bak_data = _read_backup_file(BACKUP_BACKUP_PATH)
-    if bak_data is not None:
+    Returns (tables, to_repeat_by_name, recovered_from_bak)."""
+    main_raw = _read_backup_raw(BACKUP_PATH)
+    if main_raw is not None:
+        tables, to_repeat = _parse_backup_data(main_raw)
+        if tables or main_raw == {}:
+            return tables, to_repeat, False
+    bak_raw = _read_backup_raw(BACKUP_BACKUP_PATH)
+    if bak_raw is not None:
+        tables, to_repeat = _parse_backup_data(bak_raw)
         try:
             with open(BACKUP_PATH, "w", encoding="utf-8") as f:
-                json.dump(bak_data, f, ensure_ascii=False, indent=2)
+                json.dump(
+                    {name: {"table": _table_to_backup(t), "to_repeat": _table_to_backup(to_repeat.get(name, []))} for name, t in tables.items()},
+                    f, ensure_ascii=False, indent=2,
+                )
         except OSError:
             pass
-        return {k: _backup_to_table(v) for k, v in bak_data.items()}, True
-    return {}, False
+        return tables, to_repeat, True
+    return {}, {}, False
 
 
-def save_backup(boards: dict[str, Table]) -> None:
-    """Saves backup: first copy main→.bak, then save to main (via temp file)."""
+def save_backup(boards: dict[str, Table], to_repeat_by_name: dict[str, list[TableRow]] | None = None) -> None:
+    """Saves backup: each board is one object { table, to_repeat }. If to_repeat_by_name is None, keeps current from file."""
     if not isinstance(boards, dict):
         raise ValueError("Invalid backup structure")
     for k, v in boards.items():
         if not isinstance(k, str) or not _validate_table(v):
             raise ValueError("Invalid backup structure")
-    serialized = {k: _table_to_backup(v) for k, v in boards.items()}
-    if _validate_backup(serialized) is None:
-        raise ValueError("Invalid backup structure")
+    if to_repeat_by_name is None:
+        _, to_repeat_by_name, _ = load_backup()
+    payload = {
+        name: {
+            "table": _table_to_backup(boards[name]),
+            "to_repeat": _table_to_backup(to_repeat_by_name.get(name, [])),
+        }
+        for name in boards
+    }
     if os.path.exists(BACKUP_PATH):
         try:
             with open(BACKUP_PATH, "r", encoding="utf-8") as f:
@@ -175,7 +242,7 @@ def save_backup(boards: dict[str, Table]) -> None:
     fd, tmp = tempfile.mkstemp(suffix=".json", dir=os.path.dirname(BACKUP_PATH) or ".")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(serialized, f, ensure_ascii=False, indent=2)
+            json.dump(payload, f, ensure_ascii=False, indent=2)
         os.replace(tmp, BACKUP_PATH)
     except Exception:
         try:
@@ -252,6 +319,7 @@ def backup_submenu(
     current_table: Table,
     current_name: str | None,
     used_boards: dict[str, Table],
+    session_to_repeat: list[TableRow] | None = None,
 ) -> tuple[Table, str | None, dict[str, Table]]:
     clearScreen()
     label = f"Current table: {current_name or '(unnamed)'}"
@@ -266,7 +334,7 @@ def backup_submenu(
         return current_table, current_name, used_boards
 
     if choice == "Load table":
-        backup, _ = load_backup()
+        backup, _, _ = load_backup()
         if not backup:
             clearScreen()
             input("No saved tables. Enter...")
@@ -279,7 +347,7 @@ def backup_submenu(
             return backup[name], name, used_boards
 
     if choice == "Save current":
-        backup, _ = load_backup()
+        backup, to_repeat_dict, _ = load_backup()
         clearScreen()
         _print_backup_list(backup)
         choices_save = ["[new table]"] + sorted(backup.keys())
@@ -292,21 +360,24 @@ def backup_submenu(
             name = f"{base} {stamp}".strip() if base else stamp
             if name:
                 used_boards[name] = current_table
-                backup, _ = load_backup()
+                backup, to_repeat_dict, _ = load_backup()
                 backup[name] = current_table
-                save_backup(backup)
+                to_repeat_dict[name] = session_to_repeat if session_to_repeat is not None else []
+                save_backup(backup, to_repeat_dict)
                 return current_table, name, used_boards
         else:
             name = target
+            backup, to_repeat_dict, _ = load_backup()
             backup[name] = current_table
-            save_backup(backup)
+            to_repeat_dict[name] = session_to_repeat if session_to_repeat is not None else []
+            save_backup(backup, to_repeat_dict)
             used_boards[name] = current_table
             clearScreen()
             input(f"Overwritten: {name}. Enter...")
             return current_table, name, used_boards
 
     if choice == "Edit table":
-        backup, _ = load_backup()
+        backup, to_repeat_dict, _ = load_backup()
         if not backup:
             clearScreen()
             input("No saved tables. Enter...")
@@ -330,7 +401,8 @@ def backup_submenu(
             os.unlink(path)
         new_table = [_parse_table_cell(cell) for cell in raw.split(",") if cell.strip()]
         backup[name] = new_table
-        save_backup(backup)
+        to_repeat_dict[name] = []  # clear to_repeat after edit
+        save_backup(backup, to_repeat_dict)
         if current_name == name:
             current_table = new_table
         if name in used_boards:
@@ -339,7 +411,7 @@ def backup_submenu(
         input(f"Saved: {name}. Enter...")
 
     if choice == "Delete tables":
-        backup, _ = load_backup()
+        backup, to_repeat_dict, _ = load_backup()
         if not backup:
             clearScreen()
             input("No saved tables. Enter...")
@@ -366,7 +438,8 @@ def backup_submenu(
         if confirm == "Yes, delete":
             for k in selected:
                 del backup[k]
-            save_backup(backup)
+                to_repeat_dict.pop(k, None)
+            save_backup(backup, to_repeat_dict)
             clearScreen()
             input(f"Deleted from backup: {', '.join(selected)}. Enter...")
 
@@ -375,7 +448,7 @@ def backup_submenu(
 
 def main() -> None:
     clearScreen()
-    _, recovered = load_backup()
+    _, _, recovered = load_backup()
     if recovered:
         print("Recovered backup from .bak file (main file was corrupted).")
         input("Enter...")
@@ -388,7 +461,7 @@ def main() -> None:
         current_table = getInputTable()
         current_name = None
     elif start == "Load table from backup":
-        backup, _ = load_backup()
+        backup, _, _ = load_backup()
         if not backup:
             clearScreen()
             input("No saved tables. Enter...")
@@ -410,6 +483,7 @@ def main() -> None:
     used_boards: dict[str, Table] = {}
     if current_name:
         used_boards[current_name] = current_table
+    session_to_repeat: list[TableRow] = []
 
     while True:
         clearScreen()
@@ -420,10 +494,18 @@ def main() -> None:
         if not choice or choice == "Exit":
             return
         if choice == "Shuffle":
-            to_repeat: set[TableRow] = set()
+            _, to_repeat_by_name, _ = load_backup()
+            to_repeat: set[TableRow] = set(to_repeat_by_name.get(current_name, []))
             while True:
                 current_table = getShuffledTable(current_table)
                 revealed_count = 0
+
+                def _auto_backup() -> None:
+                    if current_name:
+                        backup, to_repeat_dict, _ = load_backup()
+                        backup[current_name] = current_table
+                        to_repeat_dict[current_name] = list(to_repeat)
+                        save_backup(backup, to_repeat_dict)
                 while True:
                     clearScreen()
                     print(_table_display_with_revealed(current_table, revealed_count, to_repeat))
@@ -444,6 +526,7 @@ def main() -> None:
                         choices_list.insert(-1, "Edit to repeat")
                     again = questionary.select("\nWhat next?", choices=choices_list).ask()
                     if not again or again == "Back to menu":
+                        session_to_repeat = list(to_repeat)
                         break
                     if again == "Shuffle again":
                         break
@@ -453,6 +536,7 @@ def main() -> None:
                         continue
                     if again == "Mark last as to repeat" and revealed_count >= 1:
                         to_repeat.add(current_table[revealed_count - 1])
+                        _auto_backup()
                         continue
                     if again == "Edit to repeat" and current_table:
                         clearScreen()
@@ -466,6 +550,7 @@ def main() -> None:
                         selected = questionary.checkbox("Which to mark as to repeat?", choices=choices).ask()
                         if selected is not None:
                             to_repeat = set(selected)
+                            _auto_backup()
                         continue
                     if again == "Show to repeat" and to_repeat:
                         child_table = [r for r in current_table if r in to_repeat]
@@ -504,6 +589,7 @@ def main() -> None:
                         new_row = questionary.text("Word|translation (empty = cancel):").ask()
                         if new_row and new_row.strip():
                             current_table.append(_parse_table_cell(new_row.strip()))
+                            _auto_backup()
                     if again == "Remove element":
                         if not current_table:
                             input("Table empty. Enter...")
@@ -518,6 +604,7 @@ def main() -> None:
                             current_table.pop(to_remove)
                             to_repeat.discard(removed_row)
                             revealed_count = min(revealed_count, len(current_table))
+                            _auto_backup()
                 if again == "Back to menu":
                     break
             continue
@@ -527,7 +614,7 @@ def main() -> None:
             continue
         if choice == "Backup":
             current_table, current_name, used_boards = backup_submenu(
-                current_table, current_name, used_boards
+                current_table, current_name, used_boards, session_to_repeat
             )
             continue
 

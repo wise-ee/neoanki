@@ -2,3 +2,4 @@ neoanki_backup.json
 neoanki_backup.json.bak
 __pycache__/
 .pytest_cache/
+.cursor/
