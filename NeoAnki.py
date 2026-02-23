@@ -434,10 +434,14 @@ def main() -> None:
                             choices_list.insert(1, "Mark last as to repeat")
                         if to_repeat:
                             choices_list.insert(-1, "Show to repeat")
+                        choices_list.insert(-1, "Edit to repeat")
                     else:
                         choices_list = ["Shuffle again", "Show all translations", "Add element", "Remove element", "Back to menu"]
+                        if len(current_table) >= 1:
+                            choices_list.insert(2, "Mark last as to repeat")
                         if to_repeat:
                             choices_list.insert(-1, "Show to repeat")
+                        choices_list.insert(-1, "Edit to repeat")
                     again = questionary.select("\nWhat next?", choices=choices_list).ask()
                     if not again or again == "Back to menu":
                         break
@@ -449,6 +453,19 @@ def main() -> None:
                         continue
                     if again == "Mark last as to repeat" and revealed_count >= 1:
                         to_repeat.add(current_table[revealed_count - 1])
+                        continue
+                    if again == "Edit to repeat" and current_table:
+                        clearScreen()
+                        print("Select words to repeat (current selection is pre-checked).")
+                        print("Select/deselect: Space. Confirm: Enter.")
+                        print()
+                        choices = [
+                            questionary.Choice(title=_row_to_display(r), value=r, checked=(r in to_repeat))
+                            for r in current_table
+                        ]
+                        selected = questionary.checkbox("Which to mark as to repeat?", choices=choices).ask()
+                        if selected is not None:
+                            to_repeat = set(selected)
                         continue
                     if again == "Show to repeat" and to_repeat:
                         child_table = [r for r in current_table if r in to_repeat]
